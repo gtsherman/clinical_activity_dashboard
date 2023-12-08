@@ -3,4 +3,10 @@
     <body>
         <p>Testing deployment</p>
     </body>
+    <script>
+        const getData = async () => {
+            const data = await fetch('data/calendar.csv');
+            console.log(data);
+        }
+    </script>
 </html>
