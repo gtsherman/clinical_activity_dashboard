@@ -1,14 +1,243 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Poppins&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@event-calendar/build@2.5.0/event-calendar.min.css">
+
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@event-calendar/build@2.5.0/event-calendar.min.js"></script>
+        <script src="https://cdn.rawgit.com/Keyang/node-csvtojson/d41f44aa/browser/csvtojson.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
+        <script src="https://d3js.org/d3-array.v2.min.js" crossorigin="anonymous"></script>
+        <script src="https://www.unpkg.com/@tidyjs/tidy/dist/umd/tidy.min.js" crossorigin="anonymous"></script>
+
+        <script>
+            // tidy
+            const t = Tidy;
+
+            // chart.js
+            Chart.defaults.font.size = 16;
+            Chart.defaults.font.family = 'Poppins';
+            Chart.defaults.color = '#000';
+        </script>
+
+        <style>
+            body {
+                margin: 0 30px;
+            }
+
+            h2 {
+                margin: 0;
+            }
+
+            header h1 {
+                border-bottom: 1px solid darkgray;
+            }
+
+            html {
+                font-family: 'Poppins', sans-serif;
+            }
+
+            #calendar {
+                grid-area: calendar;
+            }
+
+            .ec-event-title {
+                overflow: hidden;
+                text-shadow: 
+                    -1px -1px 0 #000,
+                    1px -1px 0 #000,
+                    -1px 1px 0 #000,
+                    1px 1px 0 #000;
+            }
+
+            .ec-title {
+                font-size: 12pt;
+            }
+
+            #daily-counts {
+                grid-area: chart1;
+            }
+
+            #event-counts {
+                grid-area: chart2;
+            }
+
+            #dashboard {
+                display: grid;
+                grid-template-columns: 35% 55%;
+                grid-template-rows: 30vh 45vh;
+                grid-template-areas:
+                    "calendar chart1"
+                    "calendar chart2";
+                column-gap: 5%;
+                row-gap: 10%;
+            }
+        </style>
+
+        <title>NIDA IRP Clinic Activity Dashboard</title>
+    </head>
     <body>
-        <p>Testing deployment</p>
+        <header>
+            <h1>NIDA IRP Clinic Activity</h1>
+        </header>
+
+        <div id="dashboard">
+            <div id="calendar">
+                <h2>Calendar</h2>
+                <div id="calendar-display"></div>
+            </div>
+
+            <div id="daily-counts" class="chart-container">
+                <h2>Daily Visits</h2>
+                <canvas id="daily-counts-chart" class="chart-canvas"></canvas>
+            </div>
+
+            <div id="event-counts" class="chart-container">
+                <h2>Protocol Visits</h2>
+                <canvas id="event-counts-chart" class="chart-canvas"></canvas>
+            </div>
+        </div>
     </body>
     <script>
-        const getData = async () => {
-            const data = await fetch('data/calendar.csv');
-            console.log(data);
+        const palette = ["#b30000", "#7c1158", "#4421af", "#1a53ff", "#0d88e6", "#00b7c7", "#5ad45a", "#8be04e", "#ebdc78"];
+
+        const assignColor = (events, idx) => {
+            if (idx < palette.length) {
+                return palette[idx];
+            }
+            return palette[palette.length - 1];
         }
 
-        getData();
+        fetch('data/calendar.csv')
+            .then(res => res.text())
+            .then(text => csv({output: 'json'}).fromString(text))
+            .then(data => {
+                data = data
+                .map(row => ({...row, Date: luxon.DateTime.fromFormat(row.Date, 'MM/dd/yyyy').toJSDate()}))
+                .filter(row => row.Event != '');
+
+                const events = data
+                    .map(row => row.Event)
+                    .filter((e, i, a) => a.indexOf(e) === i);
+
+                new EventCalendar(document.getElementById('calendar'), {
+                    view: 'dayGridMonth',
+                    headerToolbar: {start: 'title', center: '', end: ''},
+                    //headerToolbar: {start: 'title', center: '', end: 'prev,next'},
+                    date: new Date('2023-10-28'),
+                    hiddenDays: [0, 6],
+                    events: data.map(row => {
+                        return {
+                            title: row.Event,
+                            start: row.Date,
+                            end: row.Date,
+                            allDay: true,
+                            backgroundColor: assignColor(events, events.indexOf(row.Event))
+                        }
+                    })
+                });
+
+                // **** CHART 1 ****
+                const dateCounts = t.tidy(
+                    data.map(row => ({...row, Date: luxon.DateTime.fromJSDate(row.Date).toFormat('MM/dd')})),
+                    t.groupBy('Date', [
+                        t.summarize(
+                            {
+                                count: t.n(),
+                                noshowCount: t.sum('NoShow')
+                            }
+                        )
+                    ])
+                );
+
+                new Chart(
+                    document.getElementById('daily-counts-chart'),
+                    {
+                        type: 'line',
+                        data: {
+                            labels: dateCounts.map(e => e.Date),
+                            datasets: [
+                                {
+                                    label: '# Participants',
+                                    data: dateCounts.map(e => e.count),
+                                    borderColor: '#0D6986',
+                                    backgroundColor: '#0D6986',
+                                },
+                                {
+                                    label: '# No-shows',
+                                    data: dateCounts.map(e => e.noshowCount),
+                                    borderColor: '#DBA507',
+                                    backgroundColor: '#DBA507',
+                                }
+                            ]
+                        },
+                        options: {
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    ticks: {
+                                        callback: function(val, idx) {
+                                            return idx % 2 === 0 ? this.getLabelForValue(val) : '';
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                );
+
+                // **** CHART 2 ****
+                const eventCounts = t.tidy(
+                    data,
+                    t.groupBy('Event', [
+                        t.summarize(
+                            {
+                                eventCount: t.n()
+                            }
+                        )
+                    ]),
+                    t.arrange(t.desc('eventCount'))
+                );
+
+                new Chart(
+                    document.getElementById('event-counts-chart'),
+                    {
+                        type: 'bar',
+                        data: {
+                            labels: eventCounts.map(e => e.Event),
+                            datasets: [
+                                {
+                                    label: '# Participants',
+                                    data: eventCounts.map(e => e.eventCount),
+                                    borderColor: '#33691e',
+                                    backgroundColor: '#33691e',
+                                }
+                            ]
+                        },
+                        options: {
+                            indexAxis: 'y',
+                            scales: {
+                                x: {
+                                    title: {
+                                        display: true,
+                                        text: '# Participants'
+                                    }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: false
+                                }
+                            }
+                        }
+                    }
+                )
+            });
     </script>
 </html>
